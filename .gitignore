@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Uploads (user files)
+uploads/
+
+# Data store
+submissions.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

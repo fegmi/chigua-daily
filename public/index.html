@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>吃瓜日报 - 实时投稿</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Header -->
+  <header>
+    <h1>🍉 吃瓜日报</h1>
+    <p class="subtitle">每日瓜田 · 实时同步</p>
+    <div id="live-dot"></div>
+  </header>
+
+  <!-- Main Layout -->
+  <main>
+    <!-- Submission Form -->
+    <section class="form-panel">
+      <h2>✍️ 发布投稿</h2>
+      <form id="submit-form">
+        <div class="field">
+          <label for="title">标题</label>
+          <input type="text" id="title" placeholder="给投稿起个标题…" maxlength="100">
+        </div>
+
+        <div class="field">
+          <label for="file-input">上传文件 <span class="hint">（视频 / 图片，可选）</span></label>
+          <div class="file-drop" id="drop-zone">
+            <input type="file" id="file-input" accept="image/*,video/*">
+            <div class="drop-placeholder" id="drop-placeholder">
+              <span class="icon">📁</span>
+              <span>点击或拖拽文件到此处</span>
+            </div>
+            <div class="file-preview hidden" id="file-preview">
+              <img id="preview-img" class="hidden" alt="预览">
+              <video id="preview-video" class="hidden" controls muted></video>
+              <button type="button" id="remove-file" class="remove-btn">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="content">正文文字</label>
+          <textarea id="content" rows="4" placeholder="写下你想说的话…"></textarea>
+        </div>
+
+        <button type="submit" class="btn-submit" id="submit-btn">发布 🚀</button>
+      </form>
+    </section>
+
+    <!-- Feed -->
+    <section class="feed-panel">
+      <h2>📢 实时动态</h2>
+      <div id="feed" class="feed">
+        <div class="empty-state" id="empty-state">
+          <span class="icon">🎬</span>
+          <p>还没有投稿，来做第一个吃瓜的人吧！</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>吃瓜日报 &copy; 2026 — 所有人均可自由投稿</p>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

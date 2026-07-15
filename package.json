@@ -1,0 +1,13 @@
+{
+  "name": "chigua-daily",
+  "version": "1.0.0",
+  "description": "吃瓜日报 - 实时投稿网页 - 支持视频、图片、文字上传",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "multer": "^1.4.5-lts.1"
+  }
+}
