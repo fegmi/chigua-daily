@@ -5,7 +5,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 const INDEX_FILE = path.join(__dirname, 'submissions.json');
 
@@ -212,7 +212,7 @@ app.use('/uploads/videos', express.static(path.join(UPLOAD_DIR, 'videos')));
 app.use('/uploads/images', express.static(path.join(UPLOAD_DIR, 'images')));
 
 // --- Start server ---
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  吃瓜日报已启动: http://localhost:${PORT}`);
   console.log(`  上传目录: ${UPLOAD_DIR}\n`);
 });
