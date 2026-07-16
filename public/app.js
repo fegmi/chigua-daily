@@ -28,8 +28,8 @@
     const match = document.cookie.match('(?:^|;\\s*)' + name + '=([^;]*)');
     return match ? decodeURIComponent(match[1]) : '';
   }
-  let pendingLocalIds = new Set(); // IDs rendered locally, should skip SSE re-render
   let myToken = getCookie('owner_token') || '';
+  let pendingIds = new Set(); // IDs rendered locally, skip SSE re-render
 
   // ---- File handling ----
   function handleFile(file) {
@@ -115,10 +115,10 @@
         titleInput.value = '';
         contentInput.value = '';
         clearFile();
-        // If not yet connected to SSE, manually add the card
-        pendingLocalIds.add(data.item.id);
+        // Render locally for immediate feedback
+        pendingIds.add(data.item.id);
         renderCard(data.item);
-        setTimeout(() => pendingLocalIds.delete(data.item.id), 2000);
+        setTimeout(() => pendingIds.delete(data.item.id), 5000);
       } else if (res.status === 429) {
         alert('提交太频繁，请稍后再试');
       } else {
@@ -403,12 +403,15 @@
     const evtSource = new EventSource('/stream');
 
     evtSource.addEventListener('new_submission', (e) => {
-      const item = JSON.parse(e.data);
-      // Skip if we already rendered this locally OR it already exists in DOM
-      if (pendingLocalIds.has(item.id) || feed.querySelector(`[data-id="${item.id}"]`)) return;
-      // Determine ownership via token comparison
-      item.isOwner = !!((item.ownerToken || '') && myToken === item.ownerToken);
-      renderCard(item);
+      const payload = JSON.parse(e.data);
+      // Skip if already rendered locally (avoids duplicate cards)
+      if (pendingIds.has(payload.item.id)) return;
+      // Skip if it already exists in DOM
+      if (feed.querySelector(`[data-id="${payload.item.id}"]`)) return;
+      // Read token fresh from cookie at event time
+      const currentToken = getCookie('owner_token');
+      payload.item.isOwner = !!((payload.item.ownerToken || '') && currentToken === payload.item.ownerToken);
+      renderCard(payload.item);
     });
 
     evtSource.addEventListener('deleted', (e) => {
@@ -497,6 +500,18 @@
     return div.innerHTML;
   }
   function pad(n) { return String(n).padStart(2, '0'); }
+
+  // ---- Tab switching (mobile) ----
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const tabPanels = document.querySelectorAll('.tab-panel');
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabBtns.forEach(b => b.classList.remove('active'));
+      tabPanels.forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+    });
+  });
 
   // ---- Init ----
   loadExisting();

@@ -41,7 +41,7 @@ app.use(express.json());
 
 // --- Submissions store (in-memory + JSON persistence) ---
 let submissions = [];
-let listeners = []; // SSE clients
+let listeners = []; // SSE clients → [{ res, ip }]
 
 // Load from disk on startup
 if (fs.existsSync(INDEX_FILE)) {
@@ -52,14 +52,20 @@ function saveIndex() {
   fs.writeFileSync(INDEX_FILE, JSON.stringify(submissions, null, 2));
 }
 
-function broadcast(item) {
+function broadcast(item, skipIp) {
   const data = JSON.stringify({ type: 'new_submission', item });
-  listeners.forEach(fn => { try { fn.write('data: ' + data + '\n\n'); } catch(e) { /* client disconnected */ } });
+  listeners.forEach(fn => {
+    // Skip the subscriber who submitted this item (by IP)
+    if (fn.ip === skipIp) return;
+    try { fn.res.write('event: new_submission\ndata: ' + data + '\n\n'); } catch(e) { /* client disconnected */ }
+  });
 }
 
-function broadcastEvent(eventObj) {
+function broadcastEvent(eventType, eventObj) {
   const data = JSON.stringify(eventObj);
-  listeners.forEach(fn => { try { fn.write('data: ' + data + '\n\n'); } catch(e) { /* client disconnected */ } });
+  listeners.forEach(fn => {
+    try { fn.res.write('event: ' + eventType + '\ndata: ' + data + '\n\n'); } catch(e) { /* client disconnected */ }
+  });
 }
 
 // --- SSE endpoint for real-time updates ---
@@ -70,9 +76,10 @@ app.get('/stream', (req, res) => {
     Connection: 'keep-alive',
   });
   res.write('\n');
-  listeners.push(res);
+  const ip = req.ip || req.connection.remoteAddress;
+  listeners.push({ res, ip });
   req.on('close', () => {
-    listeners = listeners.filter(l => l !== res);
+    listeners = listeners.filter(l => l.res !== res);
   });
 });
 
@@ -94,6 +101,7 @@ const upload = multer({ storage, limits: { fileSize: MAX_FILE_SIZE } });
 app.post('/api/submit', (req, res, next) => {
   // Rate limit per IP (inline, before multer)
   const ip = req.ip || req.connection.remoteAddress;
+  req.submitIp = ip;
   if (!checkRateLimit(submissionWindows, ip, RATE_LIMIT_WINDOW, RATE_LIMIT_MAX)) {
     return res.status(429).json({ ok: false, error: '提交太频繁，请稍后再试' });
   }
@@ -113,6 +121,7 @@ app.post('/api/submit', (req, res, next) => {
 }, (req, res) => {
   try {
     const { title, content } = req.body;
+    const ip = req.submitIp;
     const category = req.file ? (req.file.mimetype.startsWith('video') ? 'video' : 'image') : 'text';
     const ownerToken = crypto.randomBytes(8).toString('hex');
 
@@ -129,7 +138,7 @@ app.post('/api/submit', (req, res, next) => {
 
     submissions.unshift(item);
     saveIndex();
-    broadcast(item); // includes ownerToken for SSE
+    broadcast(item, ip); // exclude submitter from SSE broadcast
     // Set cookie so this browser becomes the owner
     res.cookie('owner_token', ownerToken, { maxAge: 365 * 24 * 60 * 60 * 1000, httpOnly: false });
     res.json({ ok: true, item });
@@ -179,7 +188,7 @@ app.delete('/api/submission/:id', (req, res) => {
     try { fs.unlinkSync(filePath); } catch(e) {}
   }
   saveIndex();
-  broadcast({ type: 'deleted', id: removed.id });
+  broadcastEvent('deleted', { id: removed.id });
   res.json({ ok: true });
 });
 
@@ -202,7 +211,7 @@ app.post('/api/submission/:id/comment', (req, res) => {
   };
   sub.comments.push(comment);
   saveIndex();
-  broadcast({ type: 'commented', id: sub.id, comment });
+  broadcastEvent('commented', { id: sub.id, comment });
   res.json({ ok: true, comment });
 });
 
@@ -215,7 +224,7 @@ app.delete('/api/submission/:id/comment/:cid', (req, res) => {
   if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
   sub.comments.splice(idx, 1);
   saveIndex();
-  broadcast({ type: 'commentDeleted', id: sub.id, commentId: req.params.cid });
+  broadcastEvent('commentDeleted', { id: sub.id, commentId: req.params.cid });
   res.json({ ok: true });
 });
 
@@ -235,7 +244,7 @@ app.post('/api/submission/:id/append', (req, res) => {
   };
   sub.appends.push(entry);
   saveIndex();
-  broadcast({ type: 'appended', id: sub.id, entry });
+  broadcastEvent('appended', { id: sub.id, entry });
   res.json({ ok: true, entry });
 });
 
@@ -252,7 +261,7 @@ app.delete('/api/submission/:id/append/:aid', (req, res) => {
   }
   sub.appends.splice(idx, 1);
   saveIndex();
-  broadcast({ type: 'appendDeleted', id: sub.id, appendId: req.params.aid });
+  broadcastEvent('appendDeleted', { id: sub.id, appendId: req.params.aid });
   res.json({ ok: true });
 });
 

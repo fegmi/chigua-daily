@@ -63,6 +63,70 @@ main {
   main { grid-template-columns: 1fr; }
 }
 
+/* ===== Tab Navigation (mobile only) ===== */
+.tab-nav {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  header { padding-top: 1.5rem; }
+
+  .tab-nav {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .tab-btn {
+    flex: 1;
+    padding: .75rem 0;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: .9rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color .2s, border-color .2s;
+  }
+  .tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  /* Hide tab panels not active */
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* Form panel adjustments on mobile */
+  .form-panel {
+    position: static;
+    padding: 1rem;
+  }
+
+  /* Feed panel adjustments */
+  .feed-panel h2 {
+    display: none; /* title already in tab */
+  }
+
+  /* Card media smaller on mobile */
+  .card-media {
+    max-height: 300px;
+  }
+  .card-media img, .card-media video {
+    max-height: 300px;
+  }
+
+  /* Smaller fonts on mobile */
+  header h1 { font-size: 1.5rem; }
+  header .subtitle { font-size: .85rem; }
+  .card-body { padding: .75rem 1rem; }
+  .card-title { font-size: .9rem; }
+  .card-text { font-size: .85rem; }
+}
+
 /* ===== Form Panel ===== */
 .form-panel {
   background: var(--surface);

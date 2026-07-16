@@ -2,7 +2,8 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0e0e11">
   <title>吃瓜日报 - 实时投稿</title>
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -14,10 +15,16 @@
     <div id="live-dot"></div>
   </header>
 
+  <!-- Tab Navigation (mobile only) -->
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="submit">✍️ 投稿</button>
+    <button class="tab-btn" data-tab="feed">📢 动态</button>
+  </nav>
+
   <!-- Main Layout -->
   <main>
     <!-- Submission Form -->
-    <section class="form-panel">
+    <section class="form-panel tab-panel active" id="panel-submit">
       <h2>✍️ 发布投稿</h2>
       <form id="submit-form">
         <div class="field">
@@ -51,7 +58,7 @@
     </section>
 
     <!-- Feed -->
-    <section class="feed-panel">
+    <section class="feed-panel tab-panel" id="panel-feed">
       <h2>📢 实时动态</h2>
       <div id="feed" class="feed">
         <div class="empty-state" id="empty-state">
