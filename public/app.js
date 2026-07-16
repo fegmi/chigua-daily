@@ -25,9 +25,10 @@
 
   // ---- Get owner token from cookie ----
   function getCookie(name) {
-    const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
-    return v ? decodeURIComponent(v.pop()) : '';
+    const match = document.cookie.match('(?:^|;\\s*)' + name + '=([^;]*)');
+    return match ? decodeURIComponent(match[1]) : '';
   }
+  let pendingLocalIds = new Set(); // IDs rendered locally, should skip SSE re-render
   let myToken = getCookie('owner_token') || '';
 
   // ---- File handling ----
@@ -97,18 +98,35 @@
 
     try {
       const res = await fetch('/api/submit', { method: 'POST', body: formData });
-      const data = await res.json();
+      // Handle non-JSON responses (e.g., HTML error pages from server errors)
+      const contentType = res.headers.get('content-type');
+      let data;
+      if (contentType && contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        // Server returned HTML (likely a 5xx or 413 error page)
+        throw new Error(`服务器返回非 JSON 响应 (${res.status})`);
+      }
       if (data.ok) {
+        // Mark as owner since we just submitted it
+        data.item.isOwner = true;
+        myToken = getCookie('owner_token') || '';
         // Clear form on success
         titleInput.value = '';
         contentInput.value = '';
         clearFile();
         // If not yet connected to SSE, manually add the card
+        pendingLocalIds.add(data.item.id);
         renderCard(data.item);
+        setTimeout(() => pendingLocalIds.delete(data.item.id), 2000);
+      } else if (res.status === 429) {
+        alert('提交太频繁，请稍后再试');
+      } else {
+        alert('提交失败：' + (data.error || '未知错误'));
       }
     } catch (err) {
       console.error('提交失败:', err);
-      alert('提交失败，请重试');
+      alert('提交失败：' + err.message);
     } finally {
       submitBtn.disabled = false;
       submitBtn.textContent = '发布 🚀';
@@ -183,7 +201,7 @@
         </div>
 
         <!-- Comments Section (collapsible) -->
-        <details class="comments-section" open="${commentCount > 0 || appendCount > 0 ? '' : 'open'}">
+        <details class="comments-section" ${commentCount > 0 || appendCount > 0 ? 'open' : ''}>
           <summary class="comments-header">
             <span>💬 ${commentCount} 条评论</span>
             ${appendCount > 0 ? `<span class="append-badge">📝 ${appendCount} 条追加</span>` : ''}
@@ -229,13 +247,17 @@
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitComment(item.id, commentInput, card); }
     });
 
-    // ---- Event delegation for appends ----
+    // ---- Event delegation for appends (only if owner) ----
     const appendInput = card.querySelector('.append-input');
     const appendBtn = card.querySelector('.btn-append');
-    appendBtn.addEventListener('click', () => submitAppend(item.id, appendInput, card));
-    appendInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitAppend(item.id, appendInput, card); }
-    });
+    if (appendBtn) {
+      appendBtn.addEventListener('click', () => submitAppend(item.id, appendInput, card));
+    }
+    if (appendInput) {
+      appendInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitAppend(item.id, appendInput, card); }
+      });
+    }
 
     // ---- Delete comment ----
     card.querySelectorAll('.comment-delete').forEach(btn => {
@@ -268,6 +290,8 @@
         input.value = '';
         // Add comment to DOM immediately
         addCommentToDOM(card, data.comment);
+      } else if (res.status === 429) {
+        alert('评论太频繁，请稍后再试');
       }
     } catch(err) { console.error('评论失败:', err); }
   }
@@ -380,6 +404,8 @@
 
     evtSource.addEventListener('new_submission', (e) => {
       const item = JSON.parse(e.data);
+      // Skip if we already rendered this locally OR it already exists in DOM
+      if (pendingLocalIds.has(item.id) || feed.querySelector(`[data-id="${item.id}"]`)) return;
       // Determine ownership via token comparison
       item.isOwner = !!((item.ownerToken || '') && myToken === item.ownerToken);
       renderCard(item);
@@ -402,11 +428,11 @@
       const card = feed.querySelector(`[data-id="${data.id}"]`);
       if (card) {
         addCommentToDOM(card, data.comment);
-        // Update comment count in header
-        const summary = card.querySelector('.comments-header');
+        // Update comment count without destroying other elements
+        const summary = card.querySelector('.comments-header span');
         if (summary) {
           const current = parseInt(summary.textContent.match(/\d+/)?.at(0) || '0', 10);
-          summary.innerHTML = `<span>💬 ${current + 1} 条评论</span>`;
+          summary.textContent = `💬 ${current + 1} 条评论`;
         }
       }
     });
@@ -428,7 +454,15 @@
     evtSource.addEventListener('commentDeleted', (e) => {
       const data = JSON.parse(e.data);
       const card = feed.querySelector(`[data-id="${data.id}"]`);
-      if (card) removeCommentFromDOM(card, data.commentId);
+      if (card) {
+        removeCommentFromDOM(card, data.commentId);
+        // Update comment count
+        const summary = card.querySelector('.comments-header span');
+        if (summary) {
+          const current = parseInt(summary.textContent.match(/\d+/)?.at(0) || '0', 10);
+          summary.textContent = `💬 ${Math.max(0, current - 1)} 条评论`;
+        }
+      }
     });
 
     evtSource.addEventListener('appendDeleted', (e) => {

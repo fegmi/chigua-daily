@@ -8,6 +8,28 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 const INDEX_FILE = path.join(__dirname, 'submissions.json');
+const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB per file
+const RATE_LIMIT_WINDOW = 60_000; // 1 minute
+const RATE_LIMIT_MAX = 30; // max submissions per window
+const COMMENT_RATE_LIMIT_WINDOW = 60_000;
+const COMMENT_RATE_LIMIT_MAX = 10;
+
+// Rate limiting stores
+const submissionWindows = new Map(); // ip → [{timestamp}]
+const commentWindows = new Map();    // ip → [{timestamp}]
+
+function checkRateLimit(map, key, windowMs, maxRequests) {
+  let entries = map.get(key) || [];
+  const now = Date.now();
+  entries = entries.filter(t => now - t < windowMs);
+  if (entries.length >= maxRequests) {
+    map.set(key, entries);
+    return false;
+  }
+  entries.push(now);
+  map.set(key, entries);
+  return true;
+}
 
 // Parse JSON request bodies
 app.use(express.json());
@@ -66,31 +88,57 @@ const storage = multer.diskStorage({
     cb(null, name);
   },
 });
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 * 1024 } }); // 5GB per file
+const upload = multer({ storage, limits: { fileSize: MAX_FILE_SIZE } });
 
 // --- API: submit new content ---
-app.post('/api/submit', upload.single('file'), (req, res) => {
-  const { title, content } = req.body;
-  const category = req.file ? (req.file.mimetype.startsWith('video') ? 'video' : 'image') : 'text';
-  const ownerToken = crypto.randomBytes(8).toString('hex');
+app.post('/api/submit', (req, res, next) => {
+  // Rate limit per IP (inline, before multer)
+  const ip = req.ip || req.connection.remoteAddress;
+  if (!checkRateLimit(submissionWindows, ip, RATE_LIMIT_WINDOW, RATE_LIMIT_MAX)) {
+    return res.status(429).json({ ok: false, error: '提交太频繁，请稍后再试' });
+  }
+  next();
+}, (req, res, next) => {
+  // Parse file upload synchronously — don't proceed until multer finishes
+  upload.single('file')(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ ok: false, error: '文件过大，最大支持 500MB' });
+      }
+      console.error('Multer error:', err.message || err);
+      return res.status(400).json({ ok: false, error: err.message || '上传失败' });
+    }
+    next();
+  });
+}, (req, res) => {
+  try {
+    const { title, content } = req.body;
+    const category = req.file ? (req.file.mimetype.startsWith('video') ? 'video' : 'image') : 'text';
+    const ownerToken = crypto.randomBytes(8).toString('hex');
 
-  const item = {
-    id: crypto.randomBytes(6).toString('hex'),
-    category,
-    title: title || (category === 'text' ? '' : '未命名投稿'),
-    content: req.body.content || '',
-    file: req.file ? req.file.filename : null,
-    mimeType: req.file ? req.file.mimetype : null,
-    ownerToken,
-    createdAt: new Date().toISOString(),
-  };
+    const item = {
+      id: crypto.randomBytes(6).toString('hex'),
+      category,
+      title: title || (category === 'text' ? '' : '未命名投稿'),
+      content: req.body.content || '',
+      file: req.file ? req.file.filename : null,
+      mimeType: req.file ? req.file.mimetype : null,
+      ownerToken,
+      createdAt: new Date().toISOString(),
+    };
 
-  submissions.unshift(item);
-  saveIndex();
-  broadcast(item); // includes ownerToken for SSE
-  // Set cookie so this browser becomes the owner
-  res.cookie('owner_token', ownerToken, { maxAge: 365 * 24 * 60 * 60 * 1000, httpOnly: false });
-  res.json({ ok: true, item });
+    submissions.unshift(item);
+    saveIndex();
+    broadcast(item); // includes ownerToken for SSE
+    // Set cookie so this browser becomes the owner
+    res.cookie('owner_token', ownerToken, { maxAge: 365 * 24 * 60 * 60 * 1000, httpOnly: false });
+    res.json({ ok: true, item });
+  } catch (err) {
+    console.error('提交处理错误:', err.message || err);
+    if (!res.headersSent) {
+      res.status(500).json({ ok: false, error: '服务器内部错误' });
+    }
+  }
 });
 
 // --- Simple cookie parser ---
@@ -139,6 +187,13 @@ app.delete('/api/submission/:id', (req, res) => {
 app.post('/api/submission/:id/comment', (req, res) => {
   const sub = submissions.find(s => s.id === req.params.id);
   if (!sub) return res.status(404).json({ ok: false, error: 'Not found' });
+
+  // Rate limit per IP
+  const ip = req.ip || req.connection.remoteAddress;
+  if (!checkRateLimit(commentWindows, ip, COMMENT_RATE_LIMIT_WINDOW, COMMENT_RATE_LIMIT_MAX)) {
+    return res.status(429).json({ ok: false, error: '评论太频繁，请稍后再试' });
+  }
+
   if (!sub.comments) sub.comments = [];
   const comment = {
     id: crypto.randomBytes(4).toString('hex'),
@@ -151,18 +206,13 @@ app.post('/api/submission/:id/comment', (req, res) => {
   res.json({ ok: true, comment });
 });
 
-// --- API: delete comment ---
+// --- API: delete comment (anyone can delete) ---
 app.delete('/api/submission/:id/comment/:cid', (req, res) => {
-  const cookies = parseCookies(req);
   const sub = submissions.find(s => s.id === req.params.id);
   if (!sub) return res.status(404).json({ ok: false, error: 'Not found' });
   if (!sub.comments) return res.json({ ok: true });
   const idx = sub.comments.findIndex(c => c.id === req.params.cid);
   if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
-  // Only owner can delete comments too
-  if (sub.ownerToken !== cookies.owner_token) {
-    return res.status(403).json({ ok: false, error: 'Only the owner can delete' });
-  }
   sub.comments.splice(idx, 1);
   saveIndex();
   broadcast({ type: 'commentDeleted', id: sub.id, commentId: req.params.cid });
@@ -210,6 +260,14 @@ app.delete('/api/submission/:id/append/:aid', (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads/videos', express.static(path.join(UPLOAD_DIR, 'videos')));
 app.use('/uploads/images', express.static(path.join(UPLOAD_DIR, 'images')));
+
+// --- Global error handler (catches anything that escapes) ---
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err.message || err);
+  if (!res.headersSent) {
+    res.status(500).json({ ok: false, error: '服务器内部错误' });
+  }
+});
 
 // --- Start server ---
 app.listen(PORT, '0.0.0.0', () => {
